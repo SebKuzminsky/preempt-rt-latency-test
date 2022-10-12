@@ -1,0 +1,100 @@
+#!/bin/bash
+set -e
+#set -x
+
+
+function get_kcmdline_arg_value() {
+    ARG="$1"
+    cat /proc/cmdline | tr ' ' '\n' | egrep "${ARG}" | cut -d = -f2
+}
+
+
+#
+# Make sure all required kernel command-line arguments are present.
+#
+
+REQUIRED_KCMDLINE_TOKENS=(
+    "rcu_nocb_poll"
+    "rcu_nocbs="
+    "isolcpus="
+    "irqaffinity="
+)
+
+for T in "${REQUIRED_KCMDLINE_TOKENS[@]}"; do
+    egrep -q "${T}" /proc/cmdline
+done
+
+
+#
+# Warn (but dont fail) if the optional kernel command-line arguments
+# are not present.
+#
+
+OPTIONAL_KCMDLINE_TOKENS=(
+    "nohz_full="
+)
+
+for T in "${OPTIONAL_KCMDLINE_TOKENS[@]}"; do
+    if ! egrep -q "${T}" /proc/cmdline; then
+        echo "${T} is missing from kernel cmdline, I hope you know what you're doing"
+    fi
+done
+
+
+#
+# Get the argument values from the kcmdline arguments that use them,
+# and make sure they're consistent.
+#
+
+ISOLCPUS=$(get_kcmdline_arg_value 'isolcpus=')
+RCU_NOCBS=$(get_kcmdline_arg_value 'rcu_nocbs=')
+IRQAFFINITY=$(get_kcmdline_arg_value 'irqaffinity=')
+
+# This is a simplified cpulist, accepting
+# only the format `<cpu number>` or `<cpu number>-<cpu number>`.
+# <https://www.kernel.org/doc/html/latest/admin-guide/kernel-parameters.html#cpu-lists>
+
+if [[ "${RCU_NOCBS}" =~ ^[0-9]+$ ]]; then
+    # It's just one number.
+    RT_CPU_MIN="${RCU_NOCBS}"
+    RT_CPU_MAX="${RCU_NOCBS}"
+elif [[ "${RCU_NOCBS}" =~ ^[0-9]+-[0-9]+$ ]]; then
+    # It's "<cpu number>-<cpu number>".
+    RT_CPU_MIN=$(echo "${RCU_NOCBS}" | sed --quiet -Ee 's/^([0-9]+)-[0-9]+$/\1/p')
+    RT_CPU_MAX=$(echo "${RCU_NOCBS}" | sed --quiet -Ee 's/^[0-9]+-([0-9]+)$/\1/p')
+else
+    echo "don't know how to parse cpu-list from rcu_nocbs arg '${RCU_NOCBS}'"
+    exit 1
+fi
+
+
+# FIXME: make sure isolcpus has the correct flags
+# FIXME: make sure isolcpus has the same RT CPUs as rcu_nocbs
+# FIXME: make sure irqaffinity has all the non-RT CPUs
+
+
+#
+# Switch all the RT CPUs to "performance" cpufreq governor.
+#
+
+for RT_CPU in $(seq ${RT_CPU_MIN} ${RT_CPU_MAX}); do
+    echo performance | sudo dd status=none of=/sys/devices/system/cpu/cpu${RT_CPU}/cpufreq/scaling_governor
+done
+
+
+# FIXME this doesnt seem to help in busywait mode
+# /proc/sys/kernel> cat sched_rt_runtime_us
+# -1
+
+
+# Move global housekeeping workqueue off the RT CPU(s) by removing them
+# from `/sys/devices/virtual/workqueue/cpumask`.  Note: not needed,
+# `isolcpus domain` does this already.
+#echo 7 | sudo dd status=none of=/sys/devices/virtual/workqueue/cpumask
+
+
+# Move interrupts off the RT CPU(s).  Note: not needed, kernel commandline
+# has `irqaffinity=0-2`.
+#for F in /proc/irq/default_smp_affinity /proc/irq/*/smp_affinity; do
+#    echo 7 | sudo dd status=none of="${F}" || true
+#done
