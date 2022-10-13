@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #include <sys/mman.h>
+#include <sys/param.h>
 #include <sys/resource.h>
 
 
@@ -208,9 +209,11 @@ void run_rt_task(int inherit_sched) {
             exit(1);
         }
 
+        // Pick a SCHED_FIFO priority well below the 50-99 where crucial
+        // kernel threads run, to avoid starvation.
         struct sched_param param;
         memset(&param, 0, sizeof(param));
-        param.sched_priority = sched_get_priority_max(SCHED_FIFO);
+        param.sched_priority = MIN(5, sched_get_priority_max(SCHED_FIFO));
 
         if (pthread_attr_setschedparam(&attr, &param) != 0) {
             printf("pthread_attr_setschedparam: %s\n", strerror(errno));

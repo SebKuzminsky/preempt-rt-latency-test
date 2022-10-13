@@ -82,9 +82,12 @@ for RT_CPU in $(seq ${RT_CPU_MIN} ${RT_CPU_MAX}); do
 done
 
 
-# FIXME this doesnt seem to help in busywait mode
-# /proc/sys/kernel> cat sched_rt_runtime_us
-# -1
+# This is important when running at SCHED_FIFO:2, doesn't help at
+# SCHED_FIFO:max(99).
+sudo sysctl --quiet kernel.sched_rt_runtime_us=-1
+
+
+# FIXME: some interesting stuff in /sys/kernel/debug/sched/features
 
 
 # Move global housekeeping workqueue off the RT CPU(s) by removing them
