@@ -45,25 +45,25 @@ uint64_t get_clocks(void) {
 }
 
 
-// Busywait reading the hardware cycle counter until one millisecond
-// has passed.
-void busywait_1ms(void) {
+// Busywait reading the hardware cycle counter until the requested number
+// of nanoseconds have passed.
+void busywait_ns(uint64_t ns) {
     uint64_t freq = get_freq();
-    uint64_t clocks_when_done = get_clocks() + (freq/1000);
+    uint64_t clocks_when_done = get_clocks() + ((freq * ns) / (1000*1000*1000));
     do {
     } while (get_clocks() < clocks_when_done);
 }
 
 
-// Busywait 1 ms, 10,000 times (10 seconds), and keep track of the max
-// amount of cycles actually spent on each iteration.
+// Busywait a short while, many times, until we reach ~10 seconds.  Keep
+// track of the max amount of cycles actually spent on each iteration.
 //
 // If the thread has exclusive use of the CPU, the max time per iteration
-// should be very close to 1 ms.
+// should be very close to busywait period.
 //
-// If the max time per iteration is significantly higher than 1 ms it
-// indicates that the thread got preempted or otherwise did not actually
-// get exclusive use of the CPU.
+// If the max time per iteration is significantly higher than the busywait
+// period it indicates that the thread got preempted or otherwise did
+// not actually get exclusive use of the CPU.
 
 void * rt_func(void * unused) {
     uint64_t freq = get_freq();
@@ -127,10 +127,12 @@ void * rt_func(void * unused) {
         printf("\n");
     }
 
-    // Run the busywait loop 10k times, report some timing statistics.
+    // Run the busywait loop ~10 seconds, report some timing statistics.
     prev_clocks = get_clocks();
+    uint64_t done_clocks = get_clocks() + (freq * 10);
+    uint64_t period_ns = 100*1000;
     do {
-        busywait_1ms();
+        busywait_ns(period_ns);
 
         // check the time
         uint64_t clocks = get_clocks();
@@ -141,7 +143,7 @@ void * rt_func(void * unused) {
         prev_clocks = clocks;
 
         iteration_counter ++;
-    } while(iteration_counter < 1e4);
+    } while(prev_clocks < done_clocks);
 
     printf("after %d iterations:\n", iteration_counter);
     printf(
